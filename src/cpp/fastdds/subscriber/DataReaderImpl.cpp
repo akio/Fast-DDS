@@ -49,7 +49,7 @@ namespace eprosima {
 namespace fastdds {
 namespace dds {
 
-void sample_info_to_dds (
+static void sample_info_to_dds (
         const SampleInfo_t& rtps_info,
         SampleInfo* dds_info)
 {
@@ -257,6 +257,56 @@ bool DataReaderImpl::wait_for_unread_message(
     return reader_ ? reader_->wait_for_unread_cache(timeout) : false;
 }
 
+ReturnCode_t DataReaderImpl::check_collection_preconditions_and_calc_max_samples(
+        LoanableCollection& data_values,
+        SampleInfoSeq& sample_infos,
+        int32_t& max_samples)
+{
+    // Properties should be the same on both collections
+    if ((data_values.has_ownership() != sample_infos.has_ownership()) ||
+            (data_values.maximum() != sample_infos.maximum()) ||
+            (data_values.length() != sample_infos.length()))
+    {
+        return ReturnCode_t::RETCODE_PRECONDITION_NOT_MET;
+    }
+
+    // Check if a loan is required
+    if (0 < data_values.maximum())
+    {
+        // Loan not required, input collections should not be already loaned
+        if (false == data_values.has_ownership())
+        {
+            return ReturnCode_t::RETCODE_PRECONDITION_NOT_MET;
+        }
+
+        uint32_t collection_input_max = data_values.maximum();
+        int32_t collection_max = (collection_input_max > std::numeric_limits<uint32_t>::max() / 2u) ?
+                std::numeric_limits<int32_t>::max() : static_cast<int32_t>(collection_input_max);
+
+        // We consider all negative value to be LENGTH_UNLIMITED
+        if (0 > max_samples)
+        {
+            // When max_samples is LENGTH_UNLIMITED, the collection imposes the maximum number of samples
+            max_samples = collection_max;
+        }
+        else
+        {
+            if (max_samples > collection_max)
+            {
+                return ReturnCode_t::RETCODE_PRECONDITION_NOT_MET;
+            }
+        }
+    }
+
+    // All preconditions have been checked. Now apply resource limits on max_samples.
+    if ((0 > max_samples) || (max_samples > qos_.reader_resource_limits().max_samples_per_read))
+    {
+        max_samples = qos_.reader_resource_limits().max_samples_per_read;
+    }
+
+    return ReturnCode_t::RETCODE_OK;
+}
+
 ReturnCode_t DataReaderImpl::read(
         LoanableCollection& data_values,
         SampleInfoSeq& sample_infos,
@@ -265,9 +315,6 @@ ReturnCode_t DataReaderImpl::read(
         ViewStateMask view_states,
         InstanceStateMask instance_states)
 {
-    static_cast<void>(data_values);
-    static_cast<void>(sample_infos);
-    static_cast<void>(max_samples);
     static_cast<void>(sample_states);
     static_cast<void>(view_states);
     static_cast<void>(instance_states);
@@ -275,6 +322,12 @@ ReturnCode_t DataReaderImpl::read(
     if (reader_ == nullptr)
     {
         return ReturnCode_t::RETCODE_NOT_ENABLED;
+    }
+
+    ReturnCode_t code = check_collection_preconditions_and_calc_max_samples(data_values, sample_infos, max_samples);
+    if (!code)
+    {
+        return code;
     }
 
     return ReturnCode_t::RETCODE_UNSUPPORTED;
@@ -289,9 +342,6 @@ ReturnCode_t DataReaderImpl::read_instance(
         ViewStateMask view_states,
         InstanceStateMask instance_states)
 {
-    static_cast<void>(data_values);
-    static_cast<void>(sample_infos);
-    static_cast<void>(max_samples);
     static_cast<void>(a_handle);
     static_cast<void>(sample_states);
     static_cast<void>(view_states);
@@ -300,6 +350,12 @@ ReturnCode_t DataReaderImpl::read_instance(
     if (reader_ == nullptr)
     {
         return ReturnCode_t::RETCODE_NOT_ENABLED;
+    }
+
+    ReturnCode_t code = check_collection_preconditions_and_calc_max_samples(data_values, sample_infos, max_samples);
+    if (!code)
+    {
+        return code;
     }
 
     return ReturnCode_t::RETCODE_UNSUPPORTED;
@@ -314,9 +370,6 @@ ReturnCode_t DataReaderImpl::read_next_instance(
         ViewStateMask view_states,
         InstanceStateMask instance_states)
 {
-    static_cast<void>(data_values);
-    static_cast<void>(sample_infos);
-    static_cast<void>(max_samples);
     static_cast<void>(previous_handle);
     static_cast<void>(sample_states);
     static_cast<void>(view_states);
@@ -325,6 +378,12 @@ ReturnCode_t DataReaderImpl::read_next_instance(
     if (reader_ == nullptr)
     {
         return ReturnCode_t::RETCODE_NOT_ENABLED;
+    }
+
+    ReturnCode_t code = check_collection_preconditions_and_calc_max_samples(data_values, sample_infos, max_samples);
+    if (!code)
+    {
+        return code;
     }
 
     return ReturnCode_t::RETCODE_UNSUPPORTED;
@@ -338,9 +397,6 @@ ReturnCode_t DataReaderImpl::take(
         ViewStateMask view_states,
         InstanceStateMask instance_states)
 {
-    static_cast<void>(data_values);
-    static_cast<void>(sample_infos);
-    static_cast<void>(max_samples);
     static_cast<void>(sample_states);
     static_cast<void>(view_states);
     static_cast<void>(instance_states);
@@ -348,6 +404,12 @@ ReturnCode_t DataReaderImpl::take(
     if (reader_ == nullptr)
     {
         return ReturnCode_t::RETCODE_NOT_ENABLED;
+    }
+
+    ReturnCode_t code = check_collection_preconditions_and_calc_max_samples(data_values, sample_infos, max_samples);
+    if (!code)
+    {
+        return code;
     }
 
     return ReturnCode_t::RETCODE_UNSUPPORTED;
@@ -362,9 +424,6 @@ ReturnCode_t DataReaderImpl::take_instance(
         ViewStateMask view_states,
         InstanceStateMask instance_states)
 {
-    static_cast<void>(data_values);
-    static_cast<void>(sample_infos);
-    static_cast<void>(max_samples);
     static_cast<void>(a_handle);
     static_cast<void>(sample_states);
     static_cast<void>(view_states);
@@ -373,6 +432,12 @@ ReturnCode_t DataReaderImpl::take_instance(
     if (reader_ == nullptr)
     {
         return ReturnCode_t::RETCODE_NOT_ENABLED;
+    }
+
+    ReturnCode_t code = check_collection_preconditions_and_calc_max_samples(data_values, sample_infos, max_samples);
+    if (!code)
+    {
+        return code;
     }
 
     return ReturnCode_t::RETCODE_UNSUPPORTED;
@@ -387,9 +452,6 @@ ReturnCode_t DataReaderImpl::take_next_instance(
         ViewStateMask view_states,
         InstanceStateMask instance_states)
 {
-    static_cast<void>(data_values);
-    static_cast<void>(sample_infos);
-    static_cast<void>(max_samples);
     static_cast<void>(previous_handle);
     static_cast<void>(sample_states);
     static_cast<void>(view_states);
@@ -398,6 +460,12 @@ ReturnCode_t DataReaderImpl::take_next_instance(
     if (reader_ == nullptr)
     {
         return ReturnCode_t::RETCODE_NOT_ENABLED;
+    }
+
+    ReturnCode_t code = check_collection_preconditions_and_calc_max_samples(data_values, sample_infos, max_samples);
+    if (!code)
+    {
+        return code;
     }
 
     return ReturnCode_t::RETCODE_UNSUPPORTED;
