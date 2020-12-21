@@ -1125,6 +1125,11 @@ bool DataReaderImpl::can_qos_be_updated(
         updatable = false;
         logWarning(RTPS_QOS_CHECK, "Data sharing configuration cannot be changed after the creation of a DataReader.");
     }
+    if (!(to.reader_resource_limits() == from.reader_resource_limits()))
+    {
+        updatable = false;
+        logWarning(DDS_QOS_CHECK, "reader_resource_limits cannot be changed after the creation of a DataReader.");
+    }
     return updatable;
 }
 
