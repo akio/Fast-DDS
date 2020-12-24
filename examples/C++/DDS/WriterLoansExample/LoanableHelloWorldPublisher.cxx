@@ -29,6 +29,10 @@
 #include <fastdds/dds/publisher/DataWriter.hpp>
 #include <fastdds/dds/publisher/qos/DataWriterQos.hpp>
 
+#include <fastdds/dds/subscriber/DataReader.hpp>
+#include <fastdds/dds/subscriber/Subscriber.hpp>
+#include <fastdds/dds/subscriber/qos/DataReaderQos.hpp>
+
 #include <thread>
 #include <chrono>
 
@@ -127,37 +131,76 @@ void LoanableHelloWorldPublisher::PubListener::on_publication_matched(
 
 void LoanableHelloWorldPublisher::run()
 {
-    std::cout << "LoanableHelloWorld DataWriter waiting for DataReaders." << std::endl;
-    while (listener_.matched == 0)
+    eprosima::fastdds::dds::Subscriber* subscriber = participant_->create_subscriber(SUBSCRIBER_QOS_DEFAULT);
+    eprosima::fastdds::dds::DataReader* reader = subscriber->create_datareader(topic_, DATAREADER_QOS_DEFAULT);
+    bool should_stop = false;
+
+    auto reader_thread_code = [reader, &should_stop]()
     {
-        std::this_thread::sleep_for(std::chrono::milliseconds(250)); // Sleep 250 ms
+        Duration_t timeout(1, 0);
+        while (!should_stop)
+        {
+            if (reader->wait_for_unread_message(timeout))
+            {
+                LoanableSequence<LoanableHelloWorld> data;
+                SampleInfoSeq infos;
+                while (ReturnCode_t::RETCODE_OK == reader->take(data, infos))
+                {
+                    for (LoanableCollection::size_type i = 0; i < infos.length(); ++i)
+                    {
+                        if (infos[i].valid_data)
+                        {
+                            std::cout << "Sample received at address " << &data[i] << std::endl;
+                        }
+                    }
+                    reader->return_loan(data, infos);
+                }
+            }
+        }
+    };
+
+    {
+        std::thread reader_thread(reader_thread_code);
+
+        std::cout << "LoanableHelloWorld DataWriter waiting for DataReaders." << std::endl;
+        while (listener_.matched == 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(250)); // Sleep 250 ms
+        }
+
+        int msgsent = 0;
+        char ch = 'y';
+        do
+        {
+            if (ch == 'y')
+            {
+                void* sample = nullptr;
+                if (ReturnCode_t::RETCODE_OK == writer_->loan_sample(sample))
+                {
+                    std::cout << "Creating sample at address " << sample << std::endl;
+                    LoanableHelloWorld* data = static_cast<LoanableHelloWorld*>(sample);
+                    data->index() = msgsent + 1;
+                    memcpy(data->message().data(), "LoanableHelloWorld ", 20);
+                    writer_->write(sample);
+                }
+                ++msgsent;
+                std::cout << "Sending sample, count=" << msgsent << ", send another sample?(y-yes,n-stop): ";
+            }
+            else if (ch == 'n')
+            {
+                std::cout << "Stopping execution " << std::endl;
+                break;
+            }
+            else
+            {
+                std::cout << "Command " << ch << " not recognized, please enter \"y/n\":";
+            }
+        } while (std::cin >> ch);
+
+        should_stop = true;
+        reader_thread.join();
     }
 
-    int msgsent = 0;
-    char ch = 'y';
-    do
-    {
-        if (ch == 'y')
-        {
-            void* sample = nullptr;
-            if (ReturnCode_t::RETCODE_OK == writer_->loan_sample(sample))
-            {
-                LoanableHelloWorld* data = static_cast<LoanableHelloWorld*>(sample);
-                data->index() = msgsent + 1;
-                memcpy(data->message().data(), "LoanableHelloWorld ", 20);
-                writer_->write(sample);
-            }
-            ++msgsent;
-            std::cout << "Sending sample, count=" << msgsent << ", send another sample?(y-yes,n-stop): ";
-        }
-        else if (ch == 'n')
-        {
-            std::cout << "Stopping execution " << std::endl;
-            break;
-        }
-        else
-        {
-            std::cout << "Command " << ch << " not recognized, please enter \"y/n\":";
-        }
-    } while (std::cin >> ch);
+    subscriber->delete_datareader(reader);
+    participant_->delete_subscriber(subscriber);
 }
